@@ -9,6 +9,10 @@ time_ms = exchange timestamp in ms):
           recv_ns, time_ms, bid_px[], bid_sz[], bid_n[], ask_px[], ask_sz[], ask_n[]  (level 0 = best)
   trades  recv_ns, time_ms, side ('B' = buyer aggressed, 'A' = seller aggressed),
           px, sz, tid, hash, buyer, seller
+Binance (coin = Hyperliquid name, e.g. BTC for BTCUSDT; time_ms = Binance transaction time):
+  bn_book5   recv_ns, time_ms, event_ms, bid_px[], bid_sz[], ask_px[], ask_sz[]
+  bn_bbo     recv_ns, time_ms, event_ms, bid_px, bid_sz, ask_px, ask_sz
+  bn_trades  recv_ns, time_ms, side, px, sz, agg_id
 """
 
 from __future__ import annotations
@@ -35,10 +39,18 @@ def _side(levels: list[dict]) -> tuple[list[float], list[float], list[int]]:
 
 
 def read_raw(path: Path):
-    with gzip.open(path, "rb") as fh:
+    """Rows of a raw file (.jsonl.gz, or the plain .jsonl still being written).
+    A partially written last line of a live file is skipped."""
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rb") as fh:
         for line in fh:
-            if line.strip():
+            if not line.strip():
+                continue
+            try:
                 yield orjson.loads(line)
+            except orjson.JSONDecodeError:
+                if path.suffix == ".gz":
+                    raise
 
 
 def bbo_table(rows) -> pa.Table:
@@ -104,22 +116,90 @@ def trades_table(rows) -> pa.Table:
     ]))
 
 
-BUILDERS = {"bbo": bbo_table, "l2Book": book_table, "l2Book20": book_table, "trades": trades_table}
+def bn_book_table(rows) -> pa.Table:
+    """Binance depth5@100ms. time_ms = transaction time T, event_ms = E."""
+    cols = {k: [] for k in ("recv_ns", "time_ms", "event_ms", "bid_px", "bid_sz", "ask_px", "ask_sz")}
+    for row in rows:
+        d = row["d"]
+        cols["recv_ns"].append(row["r"])
+        cols["time_ms"].append(d.get("T", d.get("E")))
+        cols["event_ms"].append(d.get("E"))
+        for prefix, key in (("bid", "b"), ("ask", "a")):
+            lv = d.get(key) or []
+            cols[f"{prefix}_px"].append([float(p) for p, _ in lv])
+            cols[f"{prefix}_sz"].append([float(q) for _, q in lv])
+    lf = pa.list_(pa.float64())
+    return pa.table(cols, schema=pa.schema([
+        ("recv_ns", pa.int64()), ("time_ms", pa.int64()), ("event_ms", pa.int64()),
+        ("bid_px", lf), ("bid_sz", lf), ("ask_px", lf), ("ask_sz", lf),
+    ]))
 
 
-def compact(root: str | Path, overwrite: bool = False) -> list[Path]:
+def bn_bbo_table(rows) -> pa.Table:
+    cols = {k: [] for k in ("recv_ns", "time_ms", "event_ms", "bid_px", "bid_sz", "ask_px", "ask_sz")}
+    for row in rows:
+        d = row["d"]
+        cols["recv_ns"].append(row["r"])
+        cols["time_ms"].append(d.get("T", d.get("E")))
+        cols["event_ms"].append(d.get("E"))
+        cols["bid_px"].append(float(d["b"]))
+        cols["bid_sz"].append(float(d["B"]))
+        cols["ask_px"].append(float(d["a"]))
+        cols["ask_sz"].append(float(d["A"]))
+    return pa.table(cols, schema=pa.schema([
+        ("recv_ns", pa.int64()), ("time_ms", pa.int64()), ("event_ms", pa.int64()),
+        ("bid_px", pa.float64()), ("bid_sz", pa.float64()), ("ask_px", pa.float64()), ("ask_sz", pa.float64()),
+    ]))
+
+
+def bn_trades_table(rows) -> pa.Table:
+    """Binance aggTrade. side uses the Hyperliquid convention: 'B' = buyer aggressed.
+    m=True means the buyer was the maker, so the aggressor sold -> 'A'."""
+    cols = {k: [] for k in ("recv_ns", "time_ms", "side", "px", "sz", "agg_id")}
+    seen = set()
+    for row in rows:
+        d = row["d"]
+        if d["a"] in seen:
+            continue
+        seen.add(d["a"])
+        cols["recv_ns"].append(row["r"])
+        cols["time_ms"].append(d["T"])
+        cols["side"].append("A" if d["m"] else "B")
+        cols["px"].append(float(d["p"]))
+        cols["sz"].append(float(d["q"]))
+        cols["agg_id"].append(int(d["a"]))
+    return pa.table(cols, schema=pa.schema([
+        ("recv_ns", pa.int64()), ("time_ms", pa.int64()), ("side", pa.string()),
+        ("px", pa.float64()), ("sz", pa.float64()), ("agg_id", pa.int64()),
+    ]))
+
+
+BUILDERS = {
+    "bbo": bbo_table, "l2Book": book_table, "l2Book20": book_table, "trades": trades_table,
+    "bn_book5": bn_book_table, "bn_bbo": bn_bbo_table, "bn_trades": bn_trades_table,
+}
+
+
+def compact(root: str | Path, overwrite: bool = False, include_current: bool = False) -> list[Path]:
+    """Convert raw hours to Parquet. Closed hours (.jsonl.gz) always; with
+    `include_current`, also the hour still being recorded (re-converted on the next
+    run once that hour is closed, because the .gz will be newer than the Parquet)."""
     root = Path(root)
     written = []
-    for gz in sorted((root / "raw").rglob("*.jsonl.gz")):
-        rel = gz.relative_to(root / "raw")
+    sources = sorted((root / "raw").rglob("*.jsonl.gz"))
+    if include_current:
+        sources += sorted((root / "raw").rglob("*.jsonl"))
+    for src in sources:
+        rel = src.relative_to(root / "raw")
         channel = rel.parts[0]
         builder = BUILDERS.get(channel)
         if builder is None:
             continue
-        out = root / "parquet" / rel.parent / gz.name.replace(".jsonl.gz", ".parquet")
-        if out.exists() and not overwrite and out.stat().st_mtime >= gz.stat().st_mtime:
+        out = root / "parquet" / rel.parent / (src.name.split(".")[0] + ".parquet")
+        live = src.suffix == ".jsonl"
+        if out.exists() and not overwrite and not live and out.stat().st_mtime >= src.stat().st_mtime:
             continue
-        table = builder(read_raw(gz))
+        table = builder(read_raw(src))
         out.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(table, out, compression="zstd")
         written.append(out)

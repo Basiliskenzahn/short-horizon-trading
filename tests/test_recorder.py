@@ -182,3 +182,16 @@ def test_dedupe_survives_crash(tmp_path):
         return rec
     rec = asyncio.run(second())
     assert rec.counts["trades"] == 0
+
+
+def test_compact_include_current_tolerates_partial_line(tmp_path):
+    w = HourlyWriter(tmp_path)
+    for m in FIX["bbo"]:
+        w.write("bbo", "SOL", T0, m["data"])
+    w.close()
+    d, h = hour_key(T0)
+    with open(tmp_path / "raw" / "bbo" / "SOL" / d / f"{h}.jsonl", "ab") as fh:
+        fh.write(b'{"r": 1, "d": {"coin": "SO')          # writer caught mid-line
+    assert compact(tmp_path) == []                      # closed hours only by default
+    assert len(compact(tmp_path, include_current=True)) == 1
+    assert len(load(tmp_path, "bbo", "SOL")) == 3

@@ -2,7 +2,7 @@
 
 Two gap sources:
   * events.jsonl: time between each `disconnect` and the following `connect`, per connection
-    (main = l2Book/bbo/trades, depth = l2Book20)
+    (main = l2Book/bbo/trades, depth = l2Book20, binance_book, binance_trades)
   * parquet files: largest silence between consecutive messages per hour
 """
 
@@ -26,14 +26,16 @@ def outage_gaps(root: Path) -> list[tuple[int, float, str, str]]:
     path = root / "events.jsonl"
     if not path.exists():
         return []
-    gaps, down = [], {}  # conn -> (since_ns, reason)
+    gaps, down, known = [], {}, set()  # conn -> (since_ns, reason)
     for line in path.read_bytes().splitlines():
         ev = orjson.loads(line)
         kind = ev["event"]
         if kind == "shutdown":
-            for conn in ("main", "depth"):
+            for conn in known:
                 down.setdefault(conn, (ev["ts_ns"], "shutdown"))
             continue
+        if "conn" in ev:
+            known.add(ev["conn"])
         conn = ev.get("conn", "main")
         if kind == "disconnect" and conn not in down:
             down[conn] = (ev["ts_ns"], ev.get("reason", ""))
@@ -75,4 +77,18 @@ def report(root: str | Path, gap_threshold_s: float = 5.0) -> str:
     lines.append(f"Outages >= {gap_threshold_s:.0f}s: {len(gaps)}")
     for start, secs, conn, reason in gaps:
         lines.append(f"  {_fmt(start)} UTC  {secs:8.1f}s  [{conn}] {reason}")
+
+    silent = []
+    ev_path = root / "events.jsonl"
+    if ev_path.exists():
+        for line in ev_path.read_bytes().splitlines():
+            ev = orjson.loads(line)
+            if ev["event"] == "silent_stream":
+                silent.append(ev)
+    if silent:
+        lines.append("")
+        lines.append(f"Silent-stream warnings: {len(silent)}")
+        for ev in silent[-20:]:
+            lines.append(f"  {_fmt(ev['ts_ns'])} UTC  [{ev['conn']}] {ev['channel']}/{ev['coin']} "
+                         f"silent {ev['seconds']}s")
     return "\n".join(lines)
