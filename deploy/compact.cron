@@ -1,0 +1,3 @@
+# Install with: crontab -u hl deploy/compact.cron
+# Compacts closed hours to Parquet at 5 past every hour.
+5 * * * * cd /home/hl/short-horizon-trading && .venv/bin/python -m hl_recorder --data /home/hl/data compact >> /home/hl/compact.log 2>&1

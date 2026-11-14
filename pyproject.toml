@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hl-recorder"
+version = "0.1.0"
+description = "Crash-safe Hyperliquid market data recorder (bbo, L2 book, trades) with Parquet compaction"
+requires-python = ">=3.10"
+dependencies = [
+    "websockets>=13",
+    "orjson>=3.9",
+    "pyarrow>=14",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-timeout>=2"]
+
+[tool.setuptools]
+packages = ["hl_recorder"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

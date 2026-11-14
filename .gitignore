@@ -1,0 +1,13 @@
+# recorded market data never goes into git
+data/
+*.jsonl
+*.jsonl.gz
+*.parquet
+
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store

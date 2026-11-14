@@ -1,0 +1,17 @@
+[Unit]
+Description=Hyperliquid market data recorder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hl
+WorkingDirectory=/home/hl/short-horizon-trading
+ExecStart=/home/hl/short-horizon-trading/.venv/bin/python -m hl_recorder --data /home/hl/data record
+Restart=always
+RestartSec=5
+# SIGINT triggers a clean shutdown (files flushed, shutdown event logged)
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
