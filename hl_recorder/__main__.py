@@ -27,6 +27,8 @@ def main() -> None:
     r.add_argument("--binance", nargs="*", default=list(BN_DEFAULT), choices=list(BN_CHANNELS),
                    help="Binance USD-M futures channels (default: bn_book5 bn_trades; "
                         "bn_bbo is very heavy). Pass --binance with no values to disable.")
+    r.add_argument("--keep-awake", action="store_true",
+                   help="prevent the computer from sleeping while recording (Windows/macOS)")
 
     c = sub.add_parser("compact", help="convert closed raw hours to Parquet")
     c.add_argument("--overwrite", action="store_true")
@@ -43,7 +45,11 @@ def main() -> None:
     )
 
     if args.cmd == "record":
-        asyncio.run(record(args.coins, args.data, tuple(args.channels), tuple(args.binance)))
+        try:
+            asyncio.run(record(args.coins, args.data, tuple(args.channels), tuple(args.binance),
+                               keep_awake=args.keep_awake))
+        except KeyboardInterrupt:
+            pass  # Windows: Ctrl+C; files were flushed in Recorder.run's finally block
     elif args.cmd == "compact":
         out = compact(args.data, overwrite=args.overwrite, include_current=args.include_current)
         print(f"wrote {len(out)} parquet file(s)")

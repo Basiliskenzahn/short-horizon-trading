@@ -304,9 +304,18 @@ class Recorder:
             self._events.close()
 
 
-async def record(coins: list[str], root: str | Path, channels=CHANNELS, binance_channels=()) -> None:
+async def record(coins: list[str], root: str | Path, channels=CHANNELS, binance_channels=(),
+                 keep_awake: bool = False) -> None:
+    from .keepawake import keep_awake as _keep_awake
+
     rec = Recorder(coins, root, channels, binance_channels=binance_channels)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, rec.stop)
-    await rec.run()
+        try:
+            loop.add_signal_handler(sig, rec.stop)
+        except NotImplementedError:
+            # Windows event loops don't support signal handlers; Ctrl+C raises
+            # KeyboardInterrupt instead, which run() turns into a clean shutdown.
+            pass
+    with _keep_awake(keep_awake):
+        await rec.run()

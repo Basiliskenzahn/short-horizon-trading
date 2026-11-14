@@ -97,6 +97,13 @@ Binance tables (`coin` = Hyperliquid name, e.g. `BTC` for BTCUSDT): `bn_book5` a
 
 Volume: roughly 0.2–0.3 GB/day compressed for 4 coins on Hyperliquid; Binance trades add about as much again.
 
+## Running on a Windows PC
+
+Double-click `scripts/start_recorder_windows.bat` (or a copy of it anywhere). It downloads the project
+to `%USERPROFILE%\short-horizon-trading`, sets up `.venv`, and records into its `data` folder. While the
+window is open the PC won't go to sleep (`--keep-awake`, Windows' equivalent of `caffeinate`), and the
+recorder restarts automatically if it ever exits. Normal sleep settings return when the window closes.
+
 ## Running 24/7 on a VPS
 
 Any small Linux VPS works (1 vCPU, 2 GB RAM, 40 GB disk is plenty for months).
