@@ -121,6 +121,25 @@ pip install -e ".[research]"
 jupyter lab research/01_signal_research.ipynb
 ```
 
+### Market replay
+
+```bash
+python -m research.replay --coin ETH                                  # last 15 minutes recorded
+python -m research.replay --coin BTC --start "2026-11-15 14:00" --minutes 30
+python -m research.replay --coin SOL --clock exchange                 # exchange timestamps
+```
+
+Writes one self-contained HTML file to `replays/` (data embedded, opens in any browser). It plays the
+recording back in real time or faster:
+- a depth heatmap of the order book over time
+- Hyperliquid and Binance prices with every trade as a bubble
+- live order book ladders for both venues
+- book imbalance and trade flow
+
+Hovering any panel explains what it shows and what to look for. Space plays/pauses; arrow keys step 1 s (Shift: 10 s).
+
+### Signal research
+
 `research/signals.py` holds the tested building blocks: features sampled on a regular grid with backward
 as-of joins (no lookahead), forward returns, decile tables, information coefficients, lead-lag on the
 receive clock *and* the exchange clock (to separate price lead from feed latency), and a holdout split.

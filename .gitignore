@@ -1,5 +1,6 @@
-# recorded market data never goes into git
+# recorded market data and generated replays never go into git
 data/
+replays/
 *.jsonl
 *.jsonl.gz
 *.parquet

@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Market replay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Recursive:slnt,wght,CASL@-15..0,300..800,0..1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --abyss: #0E1A2B;
+    --panel: #15253A;
+    --rule: #24384F;
+    --ink: #D9E2EC;
+    --muted: #8AA1B9;
+    --bid: #4FB3A9;
+    --ask: #E8A15A;
+    --bn: #B7A6F2;
+    --sand: #F3E9B5;
+    --focus: #F3E9B5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--abyss); color: var(--ink); }
+  body {
+    font-family: "Recursive", system-ui, sans-serif;
+    font-variation-settings: "CASL" 0.15;
+    font-size: 14px; line-height: 1.45;
+    font-feature-settings: "tnum" 1;
+    padding: 18px 22px 28px;
+  }
+  button, select, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 28px;
+    margin-bottom: 14px;
+  }
+  .title h1 {
+    margin: 0; font-size: 30px; line-height: 1.05; font-weight: 750;
+    font-variation-settings: "CASL" 0.6, "slnt" -6; letter-spacing: -0.01em;
+  }
+  .title p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .clock { margin-left: auto; text-align: right; }
+  .clock .now { font-size: 26px; font-weight: 600; line-height: 1; }
+  .clock .rel { color: var(--muted); font-size: 13px; }
+
+  .controls {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+    padding: 10px 12px; background: var(--panel); border-radius: 10px; margin-bottom: 10px;
+  }
+  .play {
+    width: 40px; height: 40px; border-radius: 50%; border: 0; cursor: pointer;
+    background: var(--sand); color: var(--abyss); font-size: 16px; font-weight: 800;
+  }
+  .controls label { color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .controls select {
+    background: var(--abyss); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 6px; color: var(--ink);
+  }
+  .controls input[type=checkbox] { accent-color: var(--bid); }
+  .controls .keys { margin-left: auto; color: var(--muted); font-size: 12px; }
+  #scrub { width: 100%; accent-color: var(--sand); margin: 2px 0 0; }
+
+  .overview { position: relative; height: 54px; background: var(--panel); border-radius: 10px; overflow: hidden; cursor: pointer; }
+
+  .layout {
+    display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; margin-top: 12px;
+  }
+  .charts { display: grid; gap: 8px; }
+  figure { margin: 0; background: var(--panel); border-radius: 10px; position: relative; }
+  figure .cap {
+    position: absolute; left: 12px; top: 8px; font-size: 12px; color: var(--muted); pointer-events: none;
+  }
+  figure .cap b { color: var(--ink); font-weight: 600; }
+  canvas { display: block; width: 100%; }
+  #price { height: 300px; }
+  #heat { height: 260px; }
+  #ind { height: 120px; }
+  #overview { height: 54px; }
+
+  aside { display: grid; gap: 12px; align-content: start; }
+  .card { background: var(--panel); border-radius: 10px; padding: 12px 14px; }
+  .card h2 { margin: 0 0 8px; font-size: 14px; font-weight: 650; }
+  .card h2 small { color: var(--muted); font-weight: 400; }
+  .ladders { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ladder { font-size: 12px; }
+  .ladder .row { position: relative; display: flex; justify-content: space-between; padding: 1px 4px; }
+  .ladder .bar { position: absolute; top: 1px; bottom: 1px; right: 0; border-radius: 2px; opacity: 0.32; }
+  .ladder .row.ask .bar { background: var(--ask); }
+  .ladder .row.bid .bar { background: var(--bid); }
+  .ladder .row span { position: relative; }
+  .ladder .row.ask .px { color: var(--ask); }
+  .ladder .row.bid .px { color: var(--bid); }
+  .ladder .gap { border-top: 1px dashed var(--rule); margin: 3px 0; }
+  .ladder .venue { color: var(--muted); margin-bottom: 4px; }
+
+  .stats { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center; font-size: 13px; }
+  .stats dt { color: var(--muted); }
+  .stats dd { margin: 0; text-align: right; font-weight: 600; }
+  .gauge { position: relative; height: 8px; background: var(--abyss); border-radius: 4px; grid-column: 1 / -1; margin-top: -2px; }
+  .gauge i { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+  .gauge::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); }
+
+  .explain p { margin: 0 0 8px; color: var(--ink); max-width: 60ch; }
+  .explain p.dim { color: var(--muted); }
+  .explain h2 { color: var(--sand); }
+
+  .tip {
+    position: fixed; pointer-events: none; background: var(--abyss); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 4px 8px; font-size: 12px; display: none; z-index: 5; white-space: nowrap;
+  }
+
+  @media (max-width: 960px) {
+    .layout { grid-template-columns: 1fr; }
+    .clock { margin-left: 0; text-align: left; }
+    .controls .keys { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <h1 id="h-title">Replay</h1>
+    <p id="h-sub"></p>
+  </div>
+  <div class="clock">
+    <div class="now" id="now">--:--:--</div>
+    <div class="rel" id="rel"></div>
+  </div>
+</header>
+
+<div class="controls">
+  <button class="play" id="play" aria-label="Play">▶</button>
+  <label>Speed
+    <select id="speed">
+      <option value="0.25">¼×</option><option value="1" selected>1×</option><option value="5">5×</option>
+      <option value="20">20×</option><option value="60">60×</option>
+    </select>
+  </label>
+  <label>Show the last
+    <select id="win">
+      <option value="10000">10 s</option><option value="30000">30 s</option>
+      <option value="60000" selected>1 min</option><option value="300000">5 min</option>
+      <option value="full">whole recording</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="showBn" checked> Binance</label>
+  <label><input type="checkbox" id="showTrades" checked> Trades</label>
+  <label><input type="checkbox" id="showBnTrades"> Binance trades</label>
+  <span class="keys">Space play/pause · ← → 1 s · Shift 10 s</span>
+  <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Position in recording">
+</div>
+
+<div class="overview" data-explain="overview"><canvas id="overview"></canvas></div>
+
+<div class="layout">
+  <div class="charts">
+    <figure data-explain="price"><canvas id="price"></canvas>
+      <div class="cap"><b>Price and trades</b> · teal = buyers hit the ask, amber = sellers hit the bid</div></figure>
+    <figure data-explain="heat"><canvas id="heat"></canvas>
+      <div class="cap"><b>Order book depth</b> · brighter = more size resting at that price</div></figure>
+    <figure data-explain="ind"><canvas id="ind"></canvas>
+      <div class="cap"><b>Signals</b> · <span style="color:var(--sand)">book imbalance</span> and <span style="color:var(--bn)">trade flow (5 s)</span></div></figure>
+  </div>
+  <aside>
+    <div class="card" data-explain="ladder">
+      <h2>Order book now <small id="book-age"></small></h2>
+      <div class="ladders">
+        <div class="ladder" id="lad-hl"></div>
+        <div class="ladder" id="lad-bn"></div>
+      </div>
+    </div>
+    <div class="card" data-explain="stats">
+      <h2>At this moment</h2>
+      <dl class="stats" id="stats"></dl>
+    </div>
+    <div class="card explain" id="explain" aria-live="polite"></div>
+  </aside>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const DATA = /*__PAYLOAD__*/null;
+
+// ------------------------------------------------------------------ explanations
+const EXPLAIN = {
+  intro: ["How to read this",
+    "Press play (or Space) and watch the four views move together. Everything on screen is what a bot on your machine would have known at that moment: nothing to the right of the newest point exists yet.",
+    "Hover over any panel to see what it shows and what to look for."],
+  overview: ["The whole recording",
+    "Hyperliquid mid-price over the full window. The lit band is what the charts below are showing. Click or drag here to jump.",
+    "Look for the busy stretches: fast moves are where short-horizon signals either prove themselves or fall apart."],
+  price: ["Price and trades",
+    "The shaded band is Hyperliquid's best bid (bottom edge) to best ask (top edge); its height is the spread. The pale line is the mid-price. The lavender line is Binance, shifted so both venues line up.",
+    "Each bubble is a trade, sized by its dollar value. Teal means a buyer was impatient and paid the ask; amber means a seller hit the bid.",
+    "Watch for the lavender line moving first and Hyperliquid following a fraction of a second later: that is the lead-lag effect from the notebook."],
+  heat: ["Order book depth",
+    "Every column is a snapshot of the top five price levels on each side, about twice per second. Teal shades are bids (buy orders waiting), amber shades are asks (sell orders waiting); brighter means more size.",
+    "A bright band that holds is a big resting order, a 'wall'. Watch what price does when it reaches one: bounce off it, or eat through it. Walls that vanish just before price arrives were probably never meant to be filled."],
+  ind: ["Signals",
+    "Book imbalance (pale): (bid size − ask size) / (bid size + ask size) at the best prices. +1 means only buyers are queued at the top, −1 only sellers. The next move tends to go toward the thin side, because it takes less volume to clear.",
+    "Trade flow (lavender): buying minus selling volume over the last 5 seconds, scaled to [−1, 1]. It shows who is being aggressive right now.",
+    "These are two of the features from the research notebook. Watch whether price actually follows when they are near ±1."],
+  ladder: ["Order book now",
+    "The five best price levels on each side, at the current moment. Asks on top (people wanting to sell), bids below (people wanting to buy); bar length is size.",
+    "Left is Hyperliquid, right is Binance futures. Binance prices are in USDT and Hyperliquid's in USDC, so the two can differ by a small constant (the basis)."],
+  stats: ["At this moment",
+    "Spread: the cost of crossing from bid to ask, in basis points (1 bp = 0.01 %). A round trip as a taker costs roughly the spread plus twice the 0.045 % fee.",
+    "Microprice: the mid-price nudged toward the side with less size — a better guess of the 'true' price than the plain mid. A positive value means it sits above the mid.",
+    "HL − Binance: how far Hyperliquid's mid is from Binance's after removing the usual basis. When this is far from zero, Hyperliquid has some catching up to do."],
+};
+function explain(key) {
+  const e = EXPLAIN[key] || EXPLAIN.intro;
+  document.getElementById("explain").innerHTML =
+    `<h2>${e[0]}</h2>` + e.slice(1).map((p, i) => `<p class="${i === e.length - 2 && e.length > 3 ? "dim" : ""}">${p}</p>`).join("");
+}
+document.querySelectorAll("[data-explain]").forEach(el =>
+  el.addEventListener("mouseenter", () => explain(el.dataset.explain)));
+explain("intro");
+
+// ------------------------------------------------------------------ helpers
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = { abyss: css("--abyss"), panel: css("--panel"), rule: css("--rule"), ink: css("--ink"),
+            muted: css("--muted"), bid: css("--bid"), ask: css("--ask"), bn: css("--bn"), sand: css("--sand") };
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const rgb = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+function bisect(arr, x) {           // last index with arr[i] <= x, or -1
+  let lo = 0, hi = arr.length - 1, ans = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] <= x) { ans = m; lo = m + 1; } else hi = m - 1; }
+  return ans;
+}
+const fmtPx = (v, d = DATA.decimals) => v == null ? "–" : v.toFixed(d);
+const fmtSz = v => v == null ? "" : (v >= 1000 ? (v / 1000).toFixed(1) + "k" : v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toPrecision(2));
+const pad2 = n => String(n).padStart(2, "0");
+function fmtTime(ms) {
+  const d = new Date(DATA.t0 + ms);
+  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}.${Math.floor(d.getUTCMilliseconds() / 100)}`;
+}
+function fmtRel(ms) { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${pad2(s % 60)}`; }
+
+function setupCanvas(id) {
+  const cv = document.getElementById(id), ctx = cv.getContext("2d");
+  const fit = () => {
+    const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cv._w = r.width; cv._h = r.height;
+  };
+  fit(); return { cv, ctx, fit };
+}
+
+// ------------------------------------------------------------------ data prep
+const D = DATA, B = D.bbo, BK = D.book, TR = D.trades, BN = D.bn, BT = D.bn_trades, IND = D.ind;
+const mid = B.t.map((_, i) => (B.bid[i] + B.ask[i]) / 2);
+const bnMid = BN ? BN.t.map((_, i) => (BN.bid[i] + BN.ask[i]) / 2 + BN.basis) : null;
+
+// trade bubble scale from the 97th percentile notional
+function notionalScale(T) {
+  if (!T || !T.t.length) return 1;
+  const n = T.px.map((p, i) => p * T.sz[i]).sort((a, b) => a - b);
+  return n[Math.floor(n.length * 0.97)] || 1;
+}
+const NQ = notionalScale(TR), BNQ = notionalScale(BT);
+let ZOOM = 1;   // bubble scale for the current window: full size at <= 1 min
+const bubble = (px, sz, q) => 1.2 + 8 * ZOOM * Math.sqrt(Math.min(px * sz / q, 1.5));
+
+// heatmap color scales: size quantile across the whole book
+let SZ_HI = 1, TICK = 0;
+if (BK) {
+  const all = [];
+  BK.bsz.forEach(r => r.forEach(v => v && all.push(v)));
+  BK.asz.forEach(r => r.forEach(v => v && all.push(v)));
+  all.sort((a, b) => a - b);
+  SZ_HI = all[Math.floor(all.length * 0.98)] || 1;
+  const diffs = [];
+  for (let j = 0; j < BK.t.length; j += Math.max(1, Math.floor(BK.t.length / 200)))
+    for (let k = 1; k < BK.levels; k++) {
+      const a = BK.bpx[j][k - 1], b = BK.bpx[j][k];
+      if (a != null && b != null && a > b) diffs.push(a - b);
+    }
+  diffs.sort((a, b) => a - b);
+  TICK = diffs[0] || Math.pow(10, -D.decimals);
+}
+const BID_RAMP = [hex(C.panel), hex("#1F5F7A"), hex(C.bid), hex(C.sand)];
+const ASK_RAMP = [hex(C.panel), hex("#6B4A2E"), hex(C.ask), hex(C.sand)];
+function ramp(stops, t) {
+  t = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+  const i = Math.min(Math.floor(t), stops.length - 2);
+  return mix(stops[i], stops[i + 1], t - i);
+}
+const sizeT = sz => Math.log1p(sz) / Math.log1p(SZ_HI);
+
+// ------------------------------------------------------------------ state
+const S = { cur: Math.min(60000, D.duration_ms), playing: false, speed: 1, win: 60000,
+            showBn: !!BN, showTrades: true, showBnTrades: false, hover: null };
+const yState = { price: null, heat: null };   // smoothed y ranges
+
+document.getElementById("h-title").textContent = `${D.coin} replay`;
+const startD = new Date(D.t0);
+document.getElementById("h-sub").textContent =
+  `${startD.toISOString().slice(0, 10)}, ${fmtTime(0).slice(0, 5)}–${fmtTime(D.duration_ms).slice(0, 5)} UTC, ` +
+  `${Math.round(D.duration_ms / 60000)} min on the ${D.clock === "recv" ? "receive" : "exchange"} clock` +
+  (BN ? "" : " (no Binance data in this window)");
+if (!BN) { const c = document.getElementById("showBn"); c.checked = false; c.disabled = true; }
+if (!BT) { document.getElementById("showBnTrades").disabled = true; }
+
+const P = setupCanvas("price"), H = setupCanvas("heat"), I = setupCanvas("ind"), O = setupCanvas("overview");
+const PADL = 8, PADR = 64;   // right gutter for price labels
+
+function view() {
+  const w = S.win === "full" ? D.duration_ms : S.win;
+  const t1 = S.win === "full" ? D.duration_ms : Math.max(S.cur, Math.min(w, D.duration_ms));
+  return { t0: t1 - w, t1, w };
+}
+const xOf = (t, v, W) => PADL + (t - v.t0) / v.w * (W - PADL - PADR);
+const tOfX = (x, v, W) => v.t0 + (x - PADL) / (W - PADL - PADR) * v.w;
+
+function smoothRange(key, lo, hi) {
+  const padv = (hi - lo) * 0.12 || TICK * 4;
+  const target = [lo - padv, hi + padv];
+  const cur = yState[key];
+  if (!cur || S.jump) { yState[key] = target; return target; }
+  const k = 0.18;
+  yState[key] = [cur[0] + (target[0] - cur[0]) * k, cur[1] + (target[1] - cur[1]) * k];
+  if (yState[key][0] > target[0]) yState[key][0] = target[0];    // never clip data
+  if (yState[key][1] < target[1]) yState[key][1] = target[1];
+  return yState[key];
+}
+
+function priceAxis(ctx, W, y, lo, hi, avoidY = null) {
+  ctx.font = "11px Recursive, system-ui"; ctx.fillStyle = C.muted; ctx.strokeStyle = C.rule; ctx.lineWidth = 1;
+  const span = hi - lo, raw = span / 5, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || raw;
+  const dp = Math.max(0, -Math.floor(Math.log10(step)) + (step / mag === 2.5 ? 1 : 0));
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    const yy = y(v);
+    ctx.beginPath(); ctx.moveTo(PADL, yy); ctx.lineTo(W - PADR, yy); ctx.stroke();
+    if (avoidY == null || Math.abs(yy - avoidY) > 12) ctx.fillText(v.toFixed(dp), W - PADR + 6, yy + 4);
+  }
+}
+function timeAxis(ctx, v, W, Hh) {
+  const steps = [1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000];
+  const step = steps.find(s => v.w / s <= 8) || 600000;
+  ctx.font = "11px Recursive, system-ui"; ctx.fillStyle = C.muted;
+  for (let t = Math.ceil(v.t0 / step) * step; t <= v.t1; t += step) {
+    const x = xOf(t, v, W); if (x < PADL + 20 || x > W - PADR - 20) continue;
+    const label = fmtTime(t).slice(0, step >= 60000 ? 5 : 8);
+    ctx.fillText(label, x - ctx.measureText(label).width / 2, Hh - 4);
+  }
+}
+function nowLine(ctx, v, W, Hh) {
+  const x = xOf(S.cur, v, W);
+  ctx.strokeStyle = C.sand; ctx.globalAlpha = 0.5; ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, Hh); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
+
+// ------------------------------------------------------------------ price chart
+function drawPrice() {
+  const { ctx, cv } = P, W = cv._w, Hh = cv._h, v = view();
+  ctx.clearRect(0, 0, W, Hh);
+  const i0 = Math.max(0, bisect(B.t, v.t0)), i1 = bisect(B.t, S.cur);
+  if (i1 < 0) return;
+  let lo = Infinity, hi = -Infinity;
+  for (let i = i0; i <= i1; i++) { lo = Math.min(lo, B.bid[i]); hi = Math.max(hi, B.ask[i]); }
+  let j0 = 0, j1 = -1;
+  if (S.showBn && BN) {
+    j0 = Math.max(0, bisect(BN.t, v.t0)); j1 = bisect(BN.t, S.cur);
+    for (let j = j0; j <= j1; j++) { lo = Math.min(lo, bnMid[j]); hi = Math.max(hi, bnMid[j]); }
+  }
+  const [ylo, yhi] = smoothRange("price", lo, hi);
+  const top = 30, bot = Hh - 20;
+  const y = p => bot - (p - ylo) / (yhi - ylo) * (bot - top);
+  P.inv = yy => ylo + (bot - yy) / (bot - top) * (yhi - ylo);
+  priceAxis(ctx, W, y, ylo, yhi, y(mid[i1]));
+  timeAxis(ctx, v, W, Hh);
+
+  // spread band (step)
+  ctx.beginPath();
+  for (let i = i0; i <= i1; i++) {
+    const x = xOf(B.t[i], v, W), xn = i < i1 ? xOf(B.t[i + 1], v, W) : xOf(S.cur, v, W);
+    i === i0 ? ctx.moveTo(x, y(B.ask[i])) : ctx.lineTo(x, y(B.ask[i])); ctx.lineTo(xn, y(B.ask[i]));
+  }
+  for (let i = i1; i >= i0; i--) {
+    const x = xOf(B.t[i], v, W), xn = i < i1 ? xOf(B.t[i + 1], v, W) : xOf(S.cur, v, W);
+    ctx.lineTo(xn, y(B.bid[i])); ctx.lineTo(x, y(B.bid[i]));
+  }
+  ctx.closePath(); ctx.fillStyle = rgb(hex(C.bid), 0.16); ctx.fill();
+
+  // mid
+  ctx.beginPath(); ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4;
+  for (let i = i0; i <= i1; i++) {
+    const x = xOf(B.t[i], v, W); i === i0 ? ctx.moveTo(x, y(mid[i])) : ctx.lineTo(x, y(mid[i]));
+  }
+  ctx.lineTo(xOf(S.cur, v, W), y(mid[i1])); ctx.stroke();
+
+  // binance (aligned mid)
+  if (S.showBn && BN && j1 >= j0) {
+    ctx.beginPath(); ctx.strokeStyle = C.bn; ctx.lineWidth = 1.4;
+    for (let j = j0; j <= j1; j++) {
+      const x = xOf(BN.t[j], v, W); j === j0 ? ctx.moveTo(x, y(bnMid[j])) : ctx.lineTo(x, y(bnMid[j]));
+    }
+    ctx.stroke();
+  }
+  // binance trades
+  if (S.showBnTrades && BT) {
+    const k0 = Math.max(0, bisect(BT.t, v.t0)), k1 = bisect(BT.t, S.cur);
+    for (let k = k0; k <= k1; k++) {
+      const r = bubble(BT.px[k], BT.sz[k], BNQ) * 0.8;
+      ctx.beginPath(); ctx.arc(xOf(BT.t[k], v, W), y(BT.px[k] + BN.basis), r, 0, 7);
+      ctx.strokeStyle = rgb(hex(BT.side[k] > 0 ? C.bid : C.ask), 0.55); ctx.lineWidth = 1; ctx.stroke();
+    }
+  }
+  // hyperliquid trades
+  if (S.showTrades && TR) {
+    const k0 = Math.max(0, bisect(TR.t, v.t0)), k1 = bisect(TR.t, S.cur);
+    for (let k = k0; k <= k1; k++) {
+      const age = (S.cur - TR.t[k]) / 1500;
+      ctx.beginPath(); ctx.arc(xOf(TR.t[k], v, W), y(TR.px[k]), bubble(TR.px[k], TR.sz[k], NQ), 0, 7);
+      ctx.fillStyle = rgb(hex(TR.side[k] > 0 ? C.bid : C.ask), age < 1 ? 0.95 : 0.6); ctx.fill();
+    }
+  }
+  nowLine(ctx, v, W, Hh);
+  // current mid label at right edge
+  ctx.fillStyle = C.sand; ctx.font = "600 11px Recursive, system-ui";
+  ctx.fillText(fmtPx(mid[i1]), W - PADR + 6, y(mid[i1]) + 4);
+  P.y = y;
+  drawHover(P, v);
+}
+
+// ------------------------------------------------------------------ heatmap
+function drawHeat() {
+  const { ctx, cv } = H, W = cv._w, Hh = cv._h, v = view();
+  ctx.clearRect(0, 0, W, Hh);
+  if (!BK) { ctx.fillStyle = C.muted; ctx.fillText("No order book data in this window", 14, 40); return; }
+  const j0 = Math.max(0, bisect(BK.t, v.t0)), j1 = bisect(BK.t, S.cur);
+  if (j1 < 0) return;
+  let lo = Infinity, hi = -Infinity;
+  for (let j = j0; j <= j1; j++) for (let k = 0; k < BK.levels; k++) {
+    if (BK.bpx[j][k] != null) lo = Math.min(lo, BK.bpx[j][k]);
+    if (BK.apx[j][k] != null) hi = Math.max(hi, BK.apx[j][k]);
+  }
+  const [ylo, yhi] = smoothRange("heat", lo, hi);
+  const top = 30, bot = Hh - 20, y = p => bot - (p - ylo) / (yhi - ylo) * (bot - top);
+  H.inv = yy => ylo + (bot - yy) / (bot - top) * (yhi - ylo);
+  const cellH = Math.max(2, Math.abs(y(0) - y(TICK)));
+  for (let j = j0; j <= j1; j++) {
+    const x = Math.max(PADL, xOf(BK.t[j], v, W));
+    const xn = j < j1 ? xOf(BK.t[j + 1], v, W) : xOf(S.cur, v, W);
+    const w = Math.max(1, xn - x + 0.6);
+    for (let k = 0; k < BK.levels; k++) {
+      const bp = BK.bpx[j][k], ap = BK.apx[j][k];
+      if (bp != null) { ctx.fillStyle = rgb(ramp(BID_RAMP, sizeT(BK.bsz[j][k]))); ctx.fillRect(x, y(bp) - cellH / 2, w, cellH); }
+      if (ap != null) { ctx.fillStyle = rgb(ramp(ASK_RAMP, sizeT(BK.asz[j][k]))); ctx.fillRect(x, y(ap) - cellH / 2, w, cellH); }
+    }
+  }
+  // mid line + trades on top
+  const i0 = Math.max(0, bisect(B.t, v.t0)), i1 = bisect(B.t, S.cur);
+  ctx.beginPath(); ctx.strokeStyle = rgb(hex(C.ink), 0.8); ctx.lineWidth = 1;
+  for (let i = i0; i <= i1; i++) { const x = xOf(B.t[i], v, W); i === i0 ? ctx.moveTo(x, y(mid[i])) : ctx.lineTo(x, y(mid[i])); }
+  ctx.stroke();
+  if (S.showTrades && TR) {
+    const k0 = Math.max(0, bisect(TR.t, v.t0)), k1 = bisect(TR.t, S.cur);
+    for (let k = k0; k <= k1; k++) {
+      ctx.beginPath(); ctx.arc(xOf(TR.t[k], v, W), y(TR.px[k]), Math.max(1.2, bubble(TR.px[k], TR.sz[k], NQ) * 0.5), 0, 7);
+      ctx.strokeStyle = TR.side[k] > 0 ? C.bid : C.ask; ctx.lineWidth = 1; ctx.stroke();
+    }
+  }
+  priceAxis(ctx, W, y, ylo, yhi);
+  timeAxis(ctx, v, W, Hh);
+  nowLine(ctx, v, W, Hh);
+  H.y = y;
+  drawHover(H, v);
+}
+
+// ------------------------------------------------------------------ indicators
+function drawInd() {
+  const { ctx, cv } = I, W = cv._w, Hh = cv._h, v = view();
+  ctx.clearRect(0, 0, W, Hh);
+  const top = 24, bot = Hh - 18, y = val => top + (1 - (val + 1) / 2) * (bot - top);
+  ctx.strokeStyle = C.rule; ctx.lineWidth = 1;
+  [-1, 0, 1].forEach(l => { ctx.beginPath(); ctx.moveTo(PADL, y(l)); ctx.lineTo(W - PADR, y(l)); ctx.stroke(); });
+  ctx.fillStyle = C.muted; ctx.font = "11px Recursive, system-ui";
+  ctx.fillText("+1", W - PADR + 6, y(1) + 4); ctx.fillText("0", W - PADR + 6, y(0) + 4); ctx.fillText("−1", W - PADR + 6, y(-1) + 4);
+  const n0 = Math.max(0, Math.floor((v.t0 - IND.t0) / IND.step)), n1 = Math.min(IND.imb1.length - 1, Math.floor((S.cur - IND.t0) / IND.step));
+  const line = (arr, color, width) => {
+    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = width; let pen = false;
+    const every = Math.max(1, Math.floor((n1 - n0) / (W * 1.5)));
+    for (let n = n0; n <= n1; n += every) {
+      const val = arr[n]; if (val == null) { pen = false; continue; }
+      const x = xOf(IND.t0 + n * IND.step, v, W);
+      pen ? ctx.lineTo(x, y(val)) : ctx.moveTo(x, y(val)); pen = true;
+    }
+    ctx.stroke();
+  };
+  line(IND.imb1, rgb(hex(C.sand), 0.85), 1.1);
+  line(IND.tfi, C.bn, 1.6);
+  timeAxis(ctx, v, W, Hh);
+  nowLine(ctx, v, W, Hh);
+}
+
+// ------------------------------------------------------------------ overview
+function drawOverview() {
+  const { ctx, cv } = O, W = cv._w, Hh = cv._h;
+  ctx.clearRect(0, 0, W, Hh);
+  let lo = Infinity, hi = -Infinity;
+  const every = Math.max(1, Math.floor(mid.length / (W * 2)));
+  for (let i = 0; i < mid.length; i += every) { lo = Math.min(lo, mid[i]); hi = Math.max(hi, mid[i]); }
+  const x = t => t / D.duration_ms * W, y = p => Hh - 6 - (p - lo) / (hi - lo || 1) * (Hh - 12);
+  const v = view();
+  ctx.fillStyle = rgb(hex(C.sand), 0.1);
+  ctx.fillRect(x(v.t0), 0, x(Math.min(v.t1, S.cur)) - x(v.t0), Hh);
+  ctx.beginPath(); ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+  for (let i = 0; i < mid.length; i += every) i === 0 ? ctx.moveTo(x(B.t[i]), y(mid[i])) : ctx.lineTo(x(B.t[i]), y(mid[i]));
+  ctx.stroke();
+  ctx.beginPath(); ctx.strokeStyle = C.ink; ctx.lineWidth = 1.3;
+  const a = Math.max(0, bisect(B.t, v.t0)), b = bisect(B.t, S.cur);
+  for (let i = a; i <= b; i += every) i === a ? ctx.moveTo(x(B.t[i]), y(mid[i])) : ctx.lineTo(x(B.t[i]), y(mid[i]));
+  ctx.stroke();
+  ctx.fillStyle = C.sand; ctx.fillRect(x(S.cur) - 1, 0, 2, Hh);
+}
+
+// ------------------------------------------------------------------ ladders + stats
+function ladderHTML(name, bpx, bsz, apx, asz, maxSz, dec = DATA.decimals) {
+  let h = `<div class="venue">${name}</div>`;
+  for (let k = apx.length - 1; k >= 0; k--) if (apx[k] != null)
+    h += `<div class="row ask"><i class="bar" style="width:${Math.min(100, asz[k] / maxSz * 100)}%"></i><span class="px">${fmtPx(apx[k], dec)}</span><span>${fmtSz(asz[k])}</span></div>`;
+  h += `<div class="gap"></div>`;
+  for (let k = 0; k < bpx.length; k++) if (bpx[k] != null)
+    h += `<div class="row bid"><i class="bar" style="width:${Math.min(100, bsz[k] / maxSz * 100)}%"></i><span class="px">${fmtPx(bpx[k], dec)}</span><span>${fmtSz(bsz[k])}</span></div>`;
+  return h;
+}
+function drawSide() {
+  const lhl = document.getElementById("lad-hl"), lbn = document.getElementById("lad-bn");
+  if (BK) {
+    const j = bisect(BK.t, S.cur);
+    if (j >= 0) {
+      const mx = Math.max(...BK.bsz[j].filter(Boolean), ...BK.asz[j].filter(Boolean));
+      lhl.innerHTML = ladderHTML("Hyperliquid", BK.bpx[j], BK.bsz[j], BK.apx[j], BK.asz[j], mx);
+      document.getElementById("book-age").textContent = `· snapshot ${((S.cur - BK.t[j]) / 1000).toFixed(1)} s old`;
+    }
+  }
+  if (BN) {
+    const j = bisect(BN.t, S.cur);
+    if (j >= 0) {
+      const mx = Math.max(...BN.bsz[j].filter(Boolean), ...BN.asz[j].filter(Boolean));
+      lbn.innerHTML = ladderHTML("Binance (USDT)", BN.bpx[j], BN.bsz[j], BN.apx[j], BN.asz[j], mx, BN.decimals);
+    } else lbn.innerHTML = `<div class="venue">Binance</div><div class="venue">recording starts at ${fmtTime(BN.t[0]).slice(0, 8)}</div>`;
+  } else lbn.innerHTML = `<div class="venue">Binance</div><div class="venue">no data</div>`;
+
+  const i = bisect(B.t, S.cur); if (i < 0) return;
+  const m = mid[i], spread = (B.ask[i] - B.bid[i]) / m * 1e4;
+  const imb = (B.bsz[i] - B.asz[i]) / (B.bsz[i] + B.asz[i]);
+  const micro = (B.bid[i] * B.asz[i] + B.ask[i] * B.bsz[i]) / (B.bsz[i] + B.asz[i]);
+  const n = Math.floor((S.cur - IND.t0) / IND.step), tfi = n >= 0 ? IND.tfi[Math.min(n, IND.tfi.length - 1)] : null;
+  let gap = null;
+  if (BN) { const j = bisect(BN.t, S.cur); if (j >= 0) gap = (m - bnMid[j]) / m * 1e4; }
+  const gauge = (val, color) => {
+    if (val == null) return "";
+    const l = val < 0 ? 50 + val * 50 : 50, w = Math.abs(val) * 50;
+    return `<div class="gauge"><i style="left:${l}%;width:${w}%;background:${color}"></i></div>`;
+  };
+  document.getElementById("stats").innerHTML =
+    `<dt>Mid</dt><dd>${fmtPx(m)}</dd>` +
+    `<dt>Spread</dt><dd>${spread.toFixed(2)} bp</dd>` +
+    `<dt>Book imbalance</dt><dd>${imb >= 0 ? "+" : ""}${imb.toFixed(2)}</dd>${gauge(imb, imb >= 0 ? C.bid : C.ask)}` +
+    `<dt>Trade flow 5 s</dt><dd>${tfi == null ? "–" : (tfi >= 0 ? "+" : "") + tfi.toFixed(2)}</dd>${gauge(tfi, C.bn)}` +
+    `<dt>Microprice − mid</dt><dd>${((micro - m) / m * 1e4).toFixed(2)} bp</dd>` +
+    (gap == null ? "" : `<dt>HL − Binance</dt><dd>${gap >= 0 ? "+" : ""}${gap.toFixed(2)} bp</dd>`);
+}
+
+// ------------------------------------------------------------------ hover readout
+const tip = document.getElementById("tip");
+function drawHover(panel, v) {
+  if (!S.hover || S.hover.panel !== panel || !panel.y) return;
+  const { ctx, cv } = panel, W = cv._w, Hh = cv._h, { x, yy } = S.hover;
+  ctx.strokeStyle = rgb(hex(C.ink), 0.35); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, Hh); ctx.moveTo(PADL, yy); ctx.lineTo(W - PADR, yy); ctx.stroke();
+}
+[P, H].forEach(panel => {
+  panel.cv.addEventListener("mousemove", e => {
+    const r = panel.cv.getBoundingClientRect(), x = e.clientX - r.left, yy = e.clientY - r.top;
+    S.hover = { panel, x, yy };
+    const v = view(), t = tOfX(x, v, panel.cv._w);
+    if (!panel.inv) return;
+    const price = panel.inv(yy);
+    tip.style.display = "block"; tip.style.left = (e.clientX + 14) + "px"; tip.style.top = (e.clientY + 12) + "px";
+    tip.textContent = `${fmtTime(t)}  ${price.toFixed(D.decimals + 1)}`;
+    if (!S.playing) render();
+  });
+  panel.cv.addEventListener("mouseleave", () => { S.hover = null; tip.style.display = "none"; if (!S.playing) render(); });
+});
+
+// ------------------------------------------------------------------ render loop + controls
+const nowEl = document.getElementById("now"), relEl = document.getElementById("rel"), scrub = document.getElementById("scrub");
+function render() {
+  ZOOM = Math.min(1, Math.sqrt(60000 / view().w));
+  drawOverview(); drawPrice(); drawHeat(); drawInd(); drawSide();
+  nowEl.textContent = fmtTime(S.cur) + " UTC";
+  relEl.textContent = `${fmtRel(S.cur)} of ${fmtRel(D.duration_ms)}`;
+  scrub.value = Math.round(S.cur / D.duration_ms * 1000);
+  S.jump = false;
+}
+let last = null;
+function tick(ts) {
+  if (!S.playing) { last = null; return; }
+  if (last != null) {
+    S.cur = Math.min(D.duration_ms, S.cur + (ts - last) * S.speed);
+    if (S.cur >= D.duration_ms) setPlaying(false);
+  }
+  last = ts; render();
+  if (S.playing) requestAnimationFrame(tick);
+}
+const playBtn = document.getElementById("play");
+function setPlaying(on) {
+  S.playing = on;
+  playBtn.textContent = on ? "❚❚" : "▶"; playBtn.setAttribute("aria-label", on ? "Pause" : "Play");
+  if (on) { if (S.cur >= D.duration_ms) { S.cur = 0; S.jump = true; } requestAnimationFrame(tick); }
+}
+function jump(t) { S.cur = Math.max(0, Math.min(D.duration_ms, t)); S.jump = true; tip.style.display = "none"; render(); }
+
+playBtn.onclick = () => setPlaying(!S.playing);
+document.getElementById("speed").onchange = e => S.speed = +e.target.value;
+document.getElementById("win").onchange = e => { S.win = e.target.value === "full" ? "full" : +e.target.value; S.jump = true; render(); };
+document.getElementById("showBn").onchange = e => { S.showBn = e.target.checked; S.jump = true; render(); };
+document.getElementById("showTrades").onchange = e => { S.showTrades = e.target.checked; render(); };
+document.getElementById("showBnTrades").onchange = e => { S.showBnTrades = e.target.checked; render(); };
+scrub.oninput = e => jump(+e.target.value / 1000 * D.duration_ms);
+
+let dragging = false;
+const ovJump = e => { const r = O.cv.getBoundingClientRect(); jump((e.clientX - r.left) / r.width * D.duration_ms); };
+O.cv.addEventListener("pointerdown", e => { dragging = true; O.cv.setPointerCapture(e.pointerId); ovJump(e); });
+O.cv.addEventListener("pointermove", e => dragging && ovJump(e));
+O.cv.addEventListener("pointerup", () => dragging = false);
+
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  if (e.code === "Space") { e.preventDefault(); setPlaying(!S.playing); }
+  if (e.code === "ArrowRight" || e.code === "ArrowLeft") {
+    e.preventDefault(); jump(S.cur + (e.code === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 10000 : 1000));
+  }
+});
+window.addEventListener("resize", () => { [P, H, I, O].forEach(p => p.fit()); render(); });
+document.fonts && document.fonts.ready.then(() => render());
+render();
+</script>
+</body>
+</html>
