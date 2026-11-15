@@ -71,7 +71,7 @@ subscribed stream that goes quiet while its connection is up.
 ```bash
 pip install -e .            # or: pip install -r requirements.txt
 
-python -m hl_recorder record                          # BTC ETH SOL HYPE, Hyperliquid + Binance, into ./data
+python -m hl_recorder record                          # 10 default coins, Hyperliquid + Binance, into ./data
 python -m hl_recorder record --coins BTC ETH --channels bbo trades --binance   # no Binance
 python -m hl_recorder compact                         # closed hours -> data/parquet/
 python -m hl_recorder compact --include-current       # also the hour still being recorded
@@ -101,7 +101,12 @@ Parquet schemas: `recv_ns` (local receive time, ns) and `time_ms` (exchange time
 Binance tables (`coin` = Hyperliquid name, e.g. `BTC` for BTCUSDT): `bn_book5` and `bn_bbo` like above plus
 `event_ms`; `bn_trades`: `side, px, sz, agg_id` with the same `B`/`A` aggressor convention.
 
-Volume: roughly 0.2–0.3 GB/day compressed for 4 coins on Hyperliquid; Binance trades add about as much again.
+Default coins: **BTC, ETH, SOL, HYPE** as reference markets (their spreads sit at one tick 80–95 % of the time,
+far below the 1.5 bp base-tier maker fee, so they are signal sources, not places to quote) and **ZRO, ASTER,
+FARTCOIN, INJ, INIT, CRV** as mid-tier candidates: 3.7–6.6 bp median spreads that are not tick-constrained, so
+quoting inside the spread is possible, and all listed on Binance futures for the reference price.
+
+Volume: about 0.8 GB/day compressed for the 10 default coins, both venues.
 
 ## Running on a Windows PC
 

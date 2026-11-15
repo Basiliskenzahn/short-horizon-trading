@@ -12,7 +12,11 @@ from .binance import BN_CHANNELS, BN_DEFAULT
 from .recorder import CHANNELS, record
 from .stats import report
 
-DEFAULT_COINS = ["BTC", "ETH", "SOL", "HYPE"]
+# Majors: reference prices / signal sources (spreads too tight to quote at base-tier fees).
+# Mid-tier: wide spreads that are not tick-constrained, so quoting inside the spread is possible.
+MAJORS = ["BTC", "ETH", "SOL", "HYPE"]
+MID_TIER = ["ZRO", "ASTER", "FARTCOIN", "INJ", "INIT", "CRV"]
+DEFAULT_COINS = MAJORS + MID_TIER
 
 
 def main() -> None:
