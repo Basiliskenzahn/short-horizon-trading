@@ -53,6 +53,12 @@ subscribed stream that goes quiet while its connection is up.
   trade id, and the dedupe window is rebuilt from disk after a crash (tested with `SIGKILL`).
 - **Self-healing connections.** App-level pings, stale detection (no message for 30 s → reconnect),
   exponential backoff with jitter.
+- **A stuck console can't stall recording.** On Windows, clicking into a console window (QuickEdit)
+  blocks every program that prints to it, which once froze this recorder for a whole night. The recorder
+  now switches QuickEdit off for its own window and logs from a background thread.
+- **Pauses are detected.** If the wall clock jumps far beyond the 10 s watchdog interval (sleep, a
+  frozen process), a `paused` event is logged and all connections are rebuilt at once; book snapshots
+  that arrive more than 10 s after their exchange timestamp are dropped instead of stored as fresh.
 - **Gaps are recorded, not hidden.** Every connect/disconnect goes to `events.jsonl`; `stats` reports
   outages and the longest silence per hour, so later analysis can exclude bad windows.
 - **Silent streams are flagged.** A stream that delivers nothing for 3 minutes while its connection is up

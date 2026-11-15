@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import orjson
@@ -87,7 +88,9 @@ def test_binance_connection_against_fake_server(tmp_path, monkeypatch):
     async def handler(ws):
         paths.append(ws.request.path)
         msgs = BN["bn_trades"] if "/market/" in ws.request.path else BN["bn_book5"]
+        now = int(time.time() * 1000)
         for m in msgs:
+            m = {**m, "data": {**m["data"], "E": now, "T": now}}  # fresh, not "late"
             await ws.send(json.dumps(m))
         if len(paths) <= 2:
             await ws.close()            # drop each connection once

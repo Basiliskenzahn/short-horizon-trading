@@ -78,13 +78,24 @@ def report(root: str | Path, gap_threshold_s: float = 5.0) -> str:
     for start, secs, conn, reason in gaps:
         lines.append(f"  {_fmt(start)} UTC  {secs:8.1f}s  [{conn}] {reason}")
 
-    silent = []
+    silent, pauses, late = [], [], {}
     ev_path = root / "events.jsonl"
     if ev_path.exists():
         for line in ev_path.read_bytes().splitlines():
             ev = orjson.loads(line)
             if ev["event"] == "silent_stream":
                 silent.append(ev)
+            elif ev["event"] == "paused":
+                pauses.append(ev)
+            elif ev["event"] == "late_dropped":
+                for ch, n in ev["counts"].items():
+                    late[ch] = late.get(ch, 0) + n
+    lines.append("")
+    lines.append(f"Pauses (machine asleep / process frozen): {len(pauses)}")
+    for ev in pauses:
+        lines.append(f"  {_fmt(ev['from_ns'])} UTC  {ev['seconds'] / 3600:8.2f} h")
+    if late:
+        lines.append(f"Late snapshots dropped (> threshold): {late}")
     if silent:
         lines.append("")
         lines.append(f"Silent-stream warnings: {len(silent)}")

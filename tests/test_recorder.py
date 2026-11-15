@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import time
 import json
 from pathlib import Path
 
@@ -115,6 +116,7 @@ def test_reconnects_after_stale_and_drop(tmp_path, monkeypatch):
         subs = [json.loads(await ws.recv()) for _ in range(3)]
         assert {s["subscription"]["type"] for s in subs} == {"l2Book", "bbo", "trades"}
         for m in FIX["bbo"]:
+            m = {**m, "data": {**m["data"], "time": int(time.time() * 1000)}}  # fresh, not "late"
             await ws.send(json.dumps(m))
         if n == 1:
             await asyncio.sleep(3)  # go silent -> stale detection
@@ -195,3 +197,34 @@ def test_compact_include_current_tolerates_partial_line(tmp_path):
     assert compact(tmp_path) == []                      # closed hours only by default
     assert len(compact(tmp_path, include_current=True)) == 1
     assert len(load(tmp_path, "bbo", "SOL")) == 3
+
+
+def test_pause_detection_forces_reconnect(tmp_path):
+    async def go():
+        rec = Recorder(["SOL"], tmp_path, channels=("bbo",))
+        assert rec.check_pause(1000.0) == 0          # first tick
+        assert rec.check_pause(1010.5) == 0          # normal tick
+        gen = rec._reset_gen
+        assert rec.check_pause(1010.5 + 12 * 3600) > 0   # slept overnight
+        assert rec._reset_gen == gen + 1
+        rec._events.close(); rec.writer.close()
+    asyncio.run(go())
+    events = [orjson.loads(l) for l in (tmp_path / "events.jsonl").read_bytes().splitlines()]
+    assert [e["event"] for e in events] == ["paused"]
+    assert "Pauses (machine asleep / process frozen): 1" in report(tmp_path)
+
+
+def test_late_snapshots_dropped_but_trades_kept(tmp_path):
+    async def go():
+        rec = Recorder(["SOL"], tmp_path)
+        m = json.loads(json.dumps(FIX["bbo"][0]))
+        exch_ns = m["data"]["time"] * 10**6
+        rec.handle(json.dumps(m), exch_ns + 2 * 10**9)            # 2 s late: kept
+        rec.handle(json.dumps(m), exch_ns + 12 * 3600 * 10**9)    # buffered overnight: dropped
+        t = json.loads(json.dumps(FIX["trades"][0]))
+        rec.handle(json.dumps(t), t["data"][0]["time"] * 10**6 + 3600 * 10**9)
+        rec._events.close(); rec.writer.close()
+        return rec
+    rec = asyncio.run(go())
+    assert rec.counts["bbo"] == 1 and rec.late_dropped["bbo"] == 1
+    assert rec.counts["trades"] > 0

@@ -7,6 +7,7 @@ import asyncio
 import logging
 
 from .compact import compact
+from .console import background_logging, quickedit_disabled
 from .binance import BN_CHANNELS, BN_DEFAULT
 from .recorder import CHANNELS, record
 from .stats import report
@@ -39,17 +40,26 @@ def main() -> None:
     s.add_argument("--gap", type=float, default=5.0, help="report outages longer than this (s)")
 
     args = ap.parse_args()
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    level = logging.DEBUG if args.verbose else logging.INFO
+    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    if args.cmd != "record":
+        logging.basicConfig(level=level, format=fmt)
 
     if args.cmd == "record":
+        # A blocked console must never stall recording: log from a background thread
+        # and switch off QuickEdit selection (Windows) while recording.
+        listener = background_logging(level, fmt)
         try:
-            asyncio.run(record(args.coins, args.data, tuple(args.channels), tuple(args.binance),
-                               keep_awake=args.keep_awake))
+            with quickedit_disabled() as qe:
+                if qe:
+                    logging.getLogger("hl_recorder").info(
+                        "QuickEdit off for this window: clicking into it no longer pauses recording")
+                asyncio.run(record(args.coins, args.data, tuple(args.channels), tuple(args.binance),
+                                   keep_awake=args.keep_awake))
         except KeyboardInterrupt:
             pass  # Windows: Ctrl+C; files were flushed in Recorder.run's finally block
+        finally:
+            listener.stop()
     elif args.cmd == "compact":
         out = compact(args.data, overwrite=args.overwrite, include_current=args.include_current)
         print(f"wrote {len(out)} parquet file(s)")

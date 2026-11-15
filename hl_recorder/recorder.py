@@ -18,6 +18,13 @@ Robustness:
   * silent-stream watchdog: a subscribed stream that sends nothing for SILENT_WARN_S
     while its connection is up is logged (catches e.g. moved endpoints that accept a
     subscription and never deliver)
+  * pause detection: if the wall clock jumps far beyond the watchdog interval, the machine
+    was asleep or the process frozen. That is logged as `paused` (with start and length)
+    and every connection is rebuilt at once, because sockets that sat through a sleep are
+    dead or full of stale buffered data
+  * book/bbo snapshots that arrive more than LATE_DROP_S after their exchange timestamp
+    (e.g. buffered through a sleep) are dropped and counted; trades are kept, the research
+    code filters them by delay
   * every connect/disconnect is logged to <root>/events.jsonl so gaps can be found later
 """
 
@@ -48,6 +55,9 @@ MAX_BACKOFF_S = 60
 HEALTHY_AFTER_S = 60
 SILENT_WARN_S = 180
 REPORT_EVERY_S = 60
+TICK_S = 10                 # watchdog interval
+PAUSE_DETECT_S = 30         # wall clock moved this much more than a tick -> we were frozen
+LATE_DROP_S = 10            # book/bbo snapshots older than this on arrival are dropped
 
 CHANNELS = ("l2Book", "l2Book20", "bbo", "trades")
 # channel -> (connection group, subscription type, extra params)
@@ -137,6 +147,9 @@ class Recorder:
         self._connected_since: dict[str, float] = {}
         self._silent: set[tuple[str, str]] = set()
         self._uptime: dict[str, float] = {}
+        self._reset_gen = 0                  # bumped after a pause -> sessions reconnect
+        self._last_tick_wall = None
+        self.late_dropped = collections.Counter()
 
     def _build(self, url, binance_urls) -> dict[str, Group]:
         groups: dict[str, Group] = {}
@@ -171,12 +184,20 @@ class Recorder:
         if group.startswith("binance"):
             routed = binance.route(msg, self._bn_coin_of)
             if routed:
-                self._store(routed[0], routed[1], recv_ns, routed[2])
+                channel, coin, data = routed
+                if channel != "bn_trades" and self._is_late(recv_ns, data.get("E")):
+                    self.late_dropped[channel] += 1
+                    return
+                self._store(channel, coin, recv_ns, data)
             return
         ch = msg.get("channel")
         data = msg.get("data")
         if ch in ("l2Book", "bbo"):
-            self._store(STORED_AS.get((group, ch), ch), data["coin"], recv_ns, data)
+            stored = STORED_AS.get((group, ch), ch)
+            if self._is_late(recv_ns, data.get("time")):
+                self.late_dropped[stored] += 1
+                return
+            self._store(stored, data["coin"], recv_ns, data)
         elif ch == "trades":
             if not data:
                 return
@@ -187,6 +208,25 @@ class Recorder:
         elif ch == "error":
             self.event("server_error", conn=group, data=data)
         # "pong" and "subscriptionResponse" need no handling
+
+    @staticmethod
+    def _is_late(recv_ns: int, exch_ms) -> bool:
+        return exch_ms is not None and recv_ns / 1e6 - exch_ms > LATE_DROP_S * 1000
+
+    def check_pause(self, now_wall: float | None = None) -> float:
+        """Called every TICK_S. Returns the pause length (s) if the wall clock jumped,
+        else 0. A pause is logged and forces every connection to reconnect."""
+        now_wall = time.time() if now_wall is None else now_wall
+        last, self._last_tick_wall = self._last_tick_wall, now_wall
+        if last is None:
+            return 0.0
+        extra = now_wall - last - TICK_S
+        if extra < PAUSE_DETECT_S:
+            return 0.0
+        self.event("paused", from_ns=int((last + TICK_S) * 1e9), seconds=round(extra, 1),
+                   note="machine asleep or process frozen; reconnecting all connections")
+        self._reset_gen += 1
+        return extra
 
     def seed_dedupe_from_disk(self) -> None:
         """After a crash the in-memory tid window is gone; rebuild it from the two
@@ -228,15 +268,23 @@ class Recorder:
 
     async def _reporter(self) -> None:
         last = collections.Counter()
+        last_late = collections.Counter()
         elapsed = 0
+        self.check_pause()
         while True:
-            await asyncio.sleep(min(REPORT_EVERY_S, 10))
+            await asyncio.sleep(TICK_S)
+            if self.check_pause():
+                self._silent.clear()
             self.check_silent()
-            elapsed += min(REPORT_EVERY_S, 10)
+            elapsed += TICK_S
             if elapsed >= REPORT_EVERY_S:
                 elapsed = 0
                 delta = self.counts - last
                 last = self.counts.copy()
+                late = self.late_dropped - last_late
+                last_late = self.late_dropped.copy()
+                if late:
+                    self.event("late_dropped", counts=dict(late), threshold_s=LATE_DROP_S)
                 log.info("last %ds: %s | lines total %d", REPORT_EVERY_S, dict(delta),
                          self.writer.lines_written)
 
@@ -250,6 +298,7 @@ class Recorder:
             self.event("connect", conn=name, coins=self.coins)
             connected_at = time.monotonic()
             self._connected_since[name] = connected_at
+            gen = self._reset_gen
             pinger = asyncio.create_task(self._pinger(ws)) if g.app_ping else None
             stopper = asyncio.create_task(self._stop.wait())
             try:
@@ -263,6 +312,8 @@ class Recorder:
                         if self._stop.is_set():
                             break
                         raise StaleConnection(f"no message for {STALE_AFTER_S}s")
+                    if self._reset_gen != gen:
+                        raise StaleConnection("reconnecting after pause")
                     self.handle(recv.result(), time.time_ns(), name)
             finally:
                 if pinger:
