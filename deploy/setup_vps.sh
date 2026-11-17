@@ -48,12 +48,12 @@ crontab -u hl $HOME_DIR/short-horizon-trading/deploy/compact.cron
 
 echo "== waiting 60 s for the first data"
 sleep 60
-systemctl --no-pager --lines=0 status hl-recorder | head -3
+echo "recorder: $(systemctl is-active hl-recorder)"
 echo "files written so far: $(find $HOME_DIR/data/raw -type f 2>/dev/null | wc -l)"
 echo "disk: $(df -h $HOME_DIR | tail -1)"
 echo
 echo "== clock sync"
-chronyc tracking | grep -E "Reference ID|System time|Last offset" || true
+chronyc tracking 2>/dev/null | grep -E "Reference ID|System time|Last offset" || true
 echo
 echo "== latency check"
 sudo -u hl $HOME_DIR/short-horizon-trading/.venv/bin/python $HOME_DIR/short-horizon-trading/deploy/latency_check.py 30
