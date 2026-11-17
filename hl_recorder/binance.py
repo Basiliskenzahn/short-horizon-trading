@@ -40,12 +40,13 @@ def symbol(coin: str) -> str:
     return f"{coin.upper()}USDT"
 
 
-def build_groups(coins, channels) -> dict[str, str]:
-    """{group: url} for the requested Binance channels."""
+def build_groups(coins, channels, bbo_coins=None) -> dict[str, str]:
+    """{group: url} for the requested Binance channels. `bbo_coins` limits the heavy
+    bookTicker channel to a subset of coins (default: all)."""
     streams: dict[str, list[str]] = {}
     for ch in channels:
         group, suffix = BN_SPEC[ch]
-        for coin in coins:
+        for coin in (bbo_coins if ch == "bn_bbo" and bbo_coins else coins):
             streams.setdefault(group, []).append(f"{symbol(coin).lower()}@{suffix}")
     return {g: _GROUP_URL[g] + "/".join(s) for g, s in streams.items()}
 

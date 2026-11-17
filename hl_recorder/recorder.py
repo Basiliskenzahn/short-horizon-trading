@@ -130,8 +130,10 @@ def build_groups(coins, channels) -> dict[str, list[dict]]:
 
 class Recorder:
     def __init__(self, coins: list[str], root: str | Path, channels=CHANNELS, url: str = WS_URL,
-                 binance_channels=(), binance_urls: dict[str, str] | None = None):
+                 binance_channels=(), binance_urls: dict[str, str] | None = None,
+                 bn_bbo_coins: list[str] | None = None):
         self.coins = coins
+        self.bn_bbo_coins = list(bn_bbo_coins) if bn_bbo_coins else None
         self.channels = tuple(channels)
         self.binance_channels = tuple(binance_channels)
         self.root = Path(root)
@@ -158,10 +160,12 @@ class Recorder:
         for ch in self.channels:
             groups[SPEC[ch][0]].streams += [(ch, c) for c in self.coins]
         if self.binance_channels:
-            for name, bn_url in binance.build_groups(self.coins, self.binance_channels).items():
+            for name, bn_url in binance.build_groups(self.coins, self.binance_channels,
+                                                     self.bn_bbo_coins).items():
                 groups[name] = Group(url=(binance_urls or {}).get(name, bn_url))
             for ch in self.binance_channels:
-                groups[binance.BN_SPEC[ch][0]].streams += [(ch, c) for c in self.coins]
+                cs = self.bn_bbo_coins if ch == "bn_bbo" and self.bn_bbo_coins else self.coins
+                groups[binance.BN_SPEC[ch][0]].streams += [(ch, c) for c in cs]
         return groups
 
     # ------------------------------------------------------------------ helpers
@@ -356,10 +360,10 @@ class Recorder:
 
 
 async def record(coins: list[str], root: str | Path, channels=CHANNELS, binance_channels=(),
-                 keep_awake: bool = False) -> None:
+                 keep_awake: bool = False, bn_bbo_coins: list[str] | None = None) -> None:
     from .keepawake import keep_awake as _keep_awake
 
-    rec = Recorder(coins, root, channels, binance_channels=binance_channels)
+    rec = Recorder(coins, root, channels, binance_channels=binance_channels, bn_bbo_coins=bn_bbo_coins)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:

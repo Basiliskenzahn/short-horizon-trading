@@ -32,6 +32,8 @@ def main() -> None:
     r.add_argument("--binance", nargs="*", default=list(BN_DEFAULT), choices=list(BN_CHANNELS),
                    help="Binance USD-M futures channels (default: bn_book5 bn_trades; "
                         "bn_bbo is very heavy). Pass --binance with no values to disable.")
+    r.add_argument("--bn-bbo-coins", nargs="+", default=None,
+                   help="limit the heavy bn_bbo (bookTicker) channel to these coins")
     r.add_argument("--keep-awake", action="store_true",
                    help="prevent the computer from sleeping while recording (Windows/macOS)")
 
@@ -59,7 +61,7 @@ def main() -> None:
                     logging.getLogger("hl_recorder").info(
                         "QuickEdit off for this window: clicking into it no longer pauses recording")
                 asyncio.run(record(args.coins, args.data, tuple(args.channels), tuple(args.binance),
-                                   keep_awake=args.keep_awake))
+                                   keep_awake=args.keep_awake, bn_bbo_coins=args.bn_bbo_coins))
         except KeyboardInterrupt:
             pass  # Windows: Ctrl+C; files were flushed in Recorder.run's finally block
         finally:
