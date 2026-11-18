@@ -23,7 +23,11 @@ if (-not (Test-Path $Key)) {
     Move-Item $alt $Key
     Write-Host "moved the key to $Key"
 }
-icacls $Key /inheritance:r /grant:r "${env:USERNAME}:(R)" | Out-Null
+# grant read access to the current user only, by SID: a name like "David" can resolve to the
+# computer itself when the PC has the same name
+$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+icacls $Key /reset | Out-Null
+icacls $Key /inheritance:r /grant:r "*${sid}:(R)" | Out-Null
 
 New-Item -ItemType Directory -Force "$Dest\parquet" | Out-Null
 $log = "$Dest\imported.txt"
