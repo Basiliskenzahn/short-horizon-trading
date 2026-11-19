@@ -40,7 +40,7 @@ sudo -u hl bash -c "
 "
 
 echo "== service"
-sed 's#--data /home/hl/data record#--data /home/hl/data record --binance bn_book5 bn_trades bn_bbo --bn-bbo-coins ASTER FARTCOIN ZRO INIT INJ CRV#' \
+sed 's#--data /home/hl/data record#--data /home/hl/data record --binance bn_book5 bn_trades bn_bbo --bn-bbo-coins ASTER FARTCOIN ZRO INIT INJ CRV --track-wallets 150#' \
   $HOME_DIR/short-horizon-trading/deploy/hl-recorder.service > /etc/systemd/system/hl-recorder.service
 systemctl daemon-reload
 systemctl enable --now hl-recorder > /dev/null

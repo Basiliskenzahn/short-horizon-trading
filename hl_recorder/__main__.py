@@ -34,6 +34,12 @@ def main() -> None:
                         "bn_bbo is very heavy). Pass --binance with no values to disable.")
     r.add_argument("--bn-bbo-coins", nargs="+", default=None,
                    help="limit the heavy bn_bbo (bookTicker) channel to these coins")
+    r.add_argument("--track-wallets", type=int, default=0, metavar="N",
+                   help="also snapshot the positions of the N most active wallets (by traded "
+                        "notional in the recorded trades) every --wallet-interval seconds")
+    r.add_argument("--pinned-wallets", default=None, metavar="FILE",
+                   help="file with extra wallet addresses to always track (one per line)")
+    r.add_argument("--wallet-interval", type=float, default=60.0)
     r.add_argument("--keep-awake", action="store_true",
                    help="prevent the computer from sleeping while recording (Windows/macOS)")
 
@@ -61,7 +67,9 @@ def main() -> None:
                     logging.getLogger("hl_recorder").info(
                         "QuickEdit off for this window: clicking into it no longer pauses recording")
                 asyncio.run(record(args.coins, args.data, tuple(args.channels), tuple(args.binance),
-                                   keep_awake=args.keep_awake, bn_bbo_coins=args.bn_bbo_coins))
+                                   keep_awake=args.keep_awake, bn_bbo_coins=args.bn_bbo_coins,
+                                   track_wallets=args.track_wallets, pinned_wallets=args.pinned_wallets,
+                                   wallet_interval_s=args.wallet_interval))
         except KeyboardInterrupt:
             pass  # Windows: Ctrl+C; files were flushed in Recorder.run's finally block
         finally:

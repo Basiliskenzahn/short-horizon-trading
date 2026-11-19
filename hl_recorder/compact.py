@@ -9,6 +9,12 @@ time_ms = exchange timestamp in ms):
           recv_ns, time_ms, bid_px[], bid_sz[], bid_n[], ask_px[], ask_sz[], ask_n[]  (level 0 = best)
   trades  recv_ns, time_ms, side ('B' = buyer aggressed, 'A' = seller aggressed),
           px, sz, tid, hash, buyer, seller
+  ctx     recv_ns, funding, premium, oracle_px, mark_px, mid_px, impact_bid, impact_ask,
+          open_interest, day_ntl_vlm   (no exchange timestamp in this stream)
+  positions (coin folder "wallets"): one row per open position per poll, plus one row with
+          coin = "" for a wallet holding nothing
+          recv_ns, time_ms, user, account_value, total_ntl, coin, szi, entry_px, position_value,
+          unrealized_pnl, leverage
 Binance (coin = Hyperliquid name, e.g. BTC for BTCUSDT; time_ms = Binance transaction time):
   bn_book5   recv_ns, time_ms, event_ms, bid_px[], bid_sz[], ask_px[], ask_sz[]
   bn_bbo     recv_ns, time_ms, event_ms, bid_px, bid_sz, ask_px, ask_sz
@@ -174,8 +180,51 @@ def bn_trades_table(rows) -> pa.Table:
     ]))
 
 
+def ctx_table(rows) -> pa.Table:
+    keys = ("funding", "premium", "oraclePx", "markPx", "midPx")
+    names = ("funding", "premium", "oracle_px", "mark_px", "mid_px")
+    cols = {k: [] for k in ("recv_ns", *names, "impact_bid", "impact_ask", "open_interest", "day_ntl_vlm")}
+    for row in rows:
+        d = row["d"]
+        cols["recv_ns"].append(row["r"])
+        for k, n in zip(keys, names):
+            cols[n].append(_f(d.get(k)))
+        imp = d.get("impactPxs") or [None, None]
+        cols["impact_bid"].append(_f(imp[0]))
+        cols["impact_ask"].append(_f(imp[1]))
+        cols["open_interest"].append(_f(d.get("openInterest")))
+        cols["day_ntl_vlm"].append(_f(d.get("dayNtlVlm")))
+    return pa.table(cols, schema=pa.schema([("recv_ns", pa.int64())] +
+                                           [(n, pa.float64()) for n in list(cols)[1:]]))
+
+
+def positions_table(rows) -> pa.Table:
+    cols = {k: [] for k in ("recv_ns", "time_ms", "user", "account_value", "total_ntl", "coin", "szi",
+                            "entry_px", "position_value", "unrealized_pnl", "leverage")}
+    for row in rows:
+        d = row["d"]
+        base = (row["r"], d.get("t"), d.get("u"), _f(d.get("av")), _f(d.get("ntl")))
+        for p in d.get("p") or [["", 0, None, 0, 0, None]]:
+            coin, szi, entry, value, upnl, lev = (list(p) + [None] * 6)[:6]
+            for k, v in zip(("recv_ns", "time_ms", "user", "account_value", "total_ntl"), base):
+                cols[k].append(v)
+            cols["coin"].append(coin or "")
+            cols["szi"].append(_f(szi))
+            cols["entry_px"].append(_f(entry))
+            cols["position_value"].append(_f(value))
+            cols["unrealized_pnl"].append(_f(upnl))
+            cols["leverage"].append(_f(lev))
+    return pa.table(cols, schema=pa.schema([
+        ("recv_ns", pa.int64()), ("time_ms", pa.int64()), ("user", pa.string()),
+        ("account_value", pa.float64()), ("total_ntl", pa.float64()), ("coin", pa.string()),
+        ("szi", pa.float64()), ("entry_px", pa.float64()), ("position_value", pa.float64()),
+        ("unrealized_pnl", pa.float64()), ("leverage", pa.float64()),
+    ]))
+
+
 BUILDERS = {
     "bbo": bbo_table, "l2Book": book_table, "l2Book20": book_table, "trades": trades_table,
+    "ctx": ctx_table, "positions": positions_table,
     "bn_book5": bn_book_table, "bn_bbo": bn_bbo_table, "bn_trades": bn_trades_table,
 }
 

@@ -5,6 +5,8 @@ Hyperliquid channels per coin (as measured on the public API, Nov 2026):
   * l2Book20  l2Book default:        top 20 levels per side, ~every 6 s
   * bbo       best bid/offer on every change, ~every 50-100 ms
   * trades    every public trade (deduplicated by tid across reconnects)
+  * ctx       activeAssetCtx: oracle, mark and mid price, funding, premium, open interest, ~1/s
+Optional (positions.py): periodic position snapshots of the most active wallets.
 
 The server cannot distinguish two l2Book subscriptions for the same coin on one
 connection, so the 20-level book runs on its own connection ("depth"); everything
@@ -44,6 +46,7 @@ import orjson
 import websockets
 
 from . import binance
+from .positions import ActivityTracker, WalletPoller
 from .writer import HourlyWriter
 
 log = logging.getLogger(__name__)
@@ -59,12 +62,13 @@ TICK_S = 10                 # watchdog interval
 PAUSE_DETECT_S = 30         # wall clock moved this much more than a tick -> we were frozen
 LATE_DROP_S = 10            # book/bbo snapshots older than this on arrival are dropped
 
-CHANNELS = ("l2Book", "l2Book20", "bbo", "trades")
+CHANNELS = ("l2Book", "l2Book20", "bbo", "trades", "ctx")
 # channel -> (connection group, subscription type, extra params)
 SPEC = {
     "l2Book": ("main", "l2Book", {"fast": True}),
     "bbo": ("main", "bbo", {}),
     "trades": ("main", "trades", {}),
+    "ctx": ("main", "activeAssetCtx", {}),
     "l2Book20": ("depth", "l2Book", {}),
 }
 # (group, incoming channel) -> stored channel name
@@ -131,7 +135,8 @@ def build_groups(coins, channels) -> dict[str, list[dict]]:
 class Recorder:
     def __init__(self, coins: list[str], root: str | Path, channels=CHANNELS, url: str = WS_URL,
                  binance_channels=(), binance_urls: dict[str, str] | None = None,
-                 bn_bbo_coins: list[str] | None = None):
+                 bn_bbo_coins: list[str] | None = None, track_wallets: int = 0,
+                 pinned_wallets: str | None = None, wallet_interval_s: float = 60.0):
         self.coins = coins
         self.bn_bbo_coins = list(bn_bbo_coins) if bn_bbo_coins else None
         self.channels = tuple(channels)
@@ -152,6 +157,12 @@ class Recorder:
         self._reset_gen = 0                  # bumped after a pause -> sessions reconnect
         self._last_tick_wall = None
         self.late_dropped = collections.Counter()
+        self.activity = ActivityTracker()
+        self.poller = None
+        if track_wallets or pinned_wallets:
+            self.poller = WalletPoller(self._store, self.event, self.activity, top=track_wallets,
+                                       pinned_file=pinned_wallets, interval_s=wallet_interval_s,
+                                       coins=coins)
 
     def _build(self, url, binance_urls) -> dict[str, Group]:
         groups: dict[str, Group] = {}
@@ -209,6 +220,10 @@ class Recorder:
             fresh = self.dedupe.filter(coin, data)
             if fresh:
                 self._store("trades", coin, recv_ns, fresh, n=len(fresh))
+                self.activity.add_trades(fresh)
+        elif ch == "activeAssetCtx":
+            if data and data.get("ctx"):
+                self._store("ctx", data["coin"], recv_ns, data["ctx"])
         elif ch == "error":
             self.event("server_error", conn=group, data=data)
         # "pong" and "subscriptionResponse" need no handling
@@ -350,20 +365,27 @@ class Recorder:
         self.writer.recover()
         self.seed_dedupe_from_disk()
         reporter = asyncio.create_task(self._reporter())
+        poller = asyncio.create_task(self.poller.run(self._stop)) if self.poller else None
         try:
             await asyncio.gather(*(self._connection_loop(n, g) for n, g in self.groups.items()))
         finally:
             reporter.cancel()
+            if poller:
+                poller.cancel()
             self.writer.close()
             self.event("shutdown")
             self._events.close()
 
 
 async def record(coins: list[str], root: str | Path, channels=CHANNELS, binance_channels=(),
-                 keep_awake: bool = False, bn_bbo_coins: list[str] | None = None) -> None:
+                 keep_awake: bool = False, bn_bbo_coins: list[str] | None = None,
+                 track_wallets: int = 0, pinned_wallets: str | None = None,
+                 wallet_interval_s: float = 60.0) -> None:
     from .keepawake import keep_awake as _keep_awake
 
-    rec = Recorder(coins, root, channels, binance_channels=binance_channels, bn_bbo_coins=bn_bbo_coins)
+    rec = Recorder(coins, root, channels, binance_channels=binance_channels, bn_bbo_coins=bn_bbo_coins,
+                   track_wallets=track_wallets, pinned_wallets=pinned_wallets,
+                   wallet_interval_s=wallet_interval_s)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
